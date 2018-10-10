@@ -57,6 +57,8 @@ namespace chainbase {
 
    constexpr char _db_dirty_flag_string[] = "db_dirty_flag";
 
+   struct empty {};
+
    struct strcmp_less
    {
       bool operator()( const shared_string& a, const shared_string& b )const
@@ -197,6 +199,10 @@ namespace chainbase {
          void validate()const {
             if( sizeof(typename MultiIndexType::node_type) != _size_of_value_type || sizeof(*this) != _size_of_this )
                BOOST_THROW_EXCEPTION( std::runtime_error("content of memory does not match data expected by executable") );
+         }
+
+         void initialize_warmstart() {
+             _next_id = _indices.available_primary_key();
          }
 
          /**
@@ -773,6 +779,38 @@ namespace chainbase {
              }
 
              idx_ptr->validate();
+
+             if( type_id >= _index_map.size() )
+                _index_map.resize( type_id + 1 );
+
+             auto new_index = new index<index_type>( *idx_ptr );
+             _index_map[ type_id ].reset( new_index );
+             _index_list.push_back( new_index );
+         }
+
+         template<typename MultiIndexType>
+         void add_database_index() {
+             const uint16_t type_id = generic_index<MultiIndexType>::value_type::type_id;
+             typedef generic_index<MultiIndexType>          index_type;
+             typedef typename index_type::allocator_type    index_alloc;
+
+             std::string type_name = boost::core::demangle( typeid( typename index_type::value_type ).name() );
+
+             if( !( _index_map.size() <= type_id || _index_map[ type_id ] == nullptr ) ) {
+                BOOST_THROW_EXCEPTION( std::logic_error( type_name + "::type_id is already in use" ) );
+             }
+
+             index_type* idx_ptr;
+             _segment->destroy< empty >( type_name.c_str() );
+             if( !_read_only ) {
+                idx_ptr = _segment->find_or_construct< index_type >( type_name.c_str() )( index_alloc( _segment->get_segment_manager() ) );
+             } else {
+                idx_ptr = _segment->find< index_type >( type_name.c_str() ).first;
+                if( !idx_ptr ) BOOST_THROW_EXCEPTION( std::runtime_error( "unable to find index for " + type_name + " in read only database" ) );
+             }
+
+             idx_ptr->validate();
+             idx_ptr->initialize_warmstart();
 
              if( type_id >= _index_map.size() )
                 _index_map.resize( type_id + 1 );
