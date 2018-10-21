@@ -196,6 +196,10 @@ namespace chainbase {
          generic_index( allocator<value_type> a )
          :_stack(a),_indices( a ),_size_of_value_type( sizeof(typename MultiIndexType::node_type) ),_size_of_this(sizeof(*this)){}
 
+         template<typename... Args>
+         generic_index( allocator<value_type> a, Args&&... args )
+         :_stack(a),_indices( a, std::forward<Args>(args)... ),_size_of_value_type( sizeof(typename MultiIndexType::node_type) ),_size_of_this(sizeof(*this)){}
+
          void validate()const {
             if( sizeof(typename MultiIndexType::node_type) != _size_of_value_type || sizeof(*this) != _size_of_this )
                BOOST_THROW_EXCEPTION( std::runtime_error("content of memory does not match data expected by executable") );
@@ -203,6 +207,10 @@ namespace chainbase {
 
          void initialize_warmstart() {
              _next_id = _indices.available_primary_key();
+         }
+
+         void disable_undo_sessions() {
+             _disabled_sessions = true;
          }
 
          /**
@@ -303,7 +311,7 @@ namespace chainbase {
          };
 
          session start_undo_session( bool enabled ) {
-            if( enabled ) {
+            if( enabled && !_disabled_sessions) {
                _stack.emplace_back( _indices.get_allocator() );
                _stack.back().old_next_id = _next_id;
                _stack.back().revision = ++_revision;
@@ -508,7 +516,7 @@ namespace chainbase {
          const auto& stack()const { return _stack; }
 
       private:
-         bool enabled()const { return _stack.size(); }
+         bool enabled()const { return !_disabled_sessions && _stack.size(); }
 
          void on_modify( const value_type& v ) {
             if( !enabled() ) return;
@@ -567,6 +575,7 @@ namespace chainbase {
          index_type                      _indices;
          uint32_t                        _size_of_value_type = 0;
          uint32_t                        _size_of_this = 0;
+         bool                            _disabled_sessions = false;
    };
 
    class abstract_session {
@@ -844,11 +853,10 @@ namespace chainbase {
             _index_list.push_back( new_index );
          }
 
-         template<typename MultiIndexType>
-         void add_database_index() {
+         template<typename MultiIndexType, typename... Args>
+         void add_chaindb_index(Args&&... args) {
              const uint16_t type_id = generic_index<MultiIndexType>::value_type::type_id;
              typedef generic_index<MultiIndexType>          index_type;
-             typedef typename index_type::allocator_type    index_alloc;
 
              std::string type_name = boost::core::demangle( typeid( typename index_type::value_type ).name() );
 
@@ -857,16 +865,15 @@ namespace chainbase {
              }
 
              index_type* idx_ptr;
-             _segment->destroy< empty >( type_name.c_str() );
              if( !_read_only ) {
-                idx_ptr = _segment->find_or_construct< index_type >( type_name.c_str() )( index_alloc( _segment->get_segment_manager() ) );
+                idx_ptr = new index_type(_segment->get_segment_manager(), std::forward<Args>(args)...);
              } else {
-                idx_ptr = _segment->find< index_type >( type_name.c_str() ).first;
-                if( !idx_ptr ) BOOST_THROW_EXCEPTION( std::runtime_error( "unable to find index for " + type_name + " in read only database" ) );
+                BOOST_THROW_EXCEPTION( std::runtime_error( "unable to find index for " + type_name + " in read only database" ) );
              }
 
              idx_ptr->validate();
              idx_ptr->initialize_warmstart();
+             idx_ptr->disable_undo_sessions();
 
              if( type_id >= _index_map.size() )
                 _index_map.resize( type_id + 1 );
@@ -958,7 +965,7 @@ namespace chainbase {
          }
 
          template< typename ObjectType >
-         const ObjectType& get( const oid< ObjectType >& key = oid< ObjectType >() )const
+         const ObjectType& get( const oid< ObjectType >& key = oid< ObjectType >(1) )const
          {
              CHAINBASE_REQUIRE_READ_LOCK("get", ObjectType);
              auto obj = find< ObjectType >( key );
