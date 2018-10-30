@@ -965,7 +965,7 @@ namespace chainbase {
          }
 
          template< typename ObjectType >
-         const ObjectType& get( const oid< ObjectType >& key = oid< ObjectType >(1) )const
+         const ObjectType& get( const oid< ObjectType >& key = oid< ObjectType >() )const
          {
              CHAINBASE_REQUIRE_READ_LOCK("get", ObjectType);
              auto obj = find< ObjectType >( key );
