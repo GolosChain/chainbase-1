@@ -92,7 +92,7 @@ namespace chainbase {
    template<typename T>
    class oid {
       public:
-         oid( int64_t i = 0 ):_id(i){}
+         oid( uint64_t i = 0 ):_id(i){}
 
          oid& operator++() { ++_id; return *this; }
 
@@ -104,7 +104,7 @@ namespace chainbase {
             s << boost::core::demangle(typeid(oid<T>).name()) << '(' << id._id << ')'; return s;
          }
 
-         int64_t _id = 0;
+         uint64_t _id = 0;
    };
 
    template<uint16_t TypeNumber, typename Derived>
